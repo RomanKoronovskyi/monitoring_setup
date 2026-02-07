@@ -1,4 +1,4 @@
-!#/bin/bash
+#!/bin/bash
 #documentation: https://grafana.com/grafana/download
 #access: http://ip:3000
 set -e
