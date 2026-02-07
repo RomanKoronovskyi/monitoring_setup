@@ -62,7 +62,7 @@ limits_config:
 EOF
 
 # Set ownership for config
-sudo chown -R loki:loki "${CONFIG_DIR}"
+sudo chown -R loki:loki "${CONF_DIR}"
 
 # Create systemd service file
 sudo cat <<EOF > "${SERVICE_FILE}"
