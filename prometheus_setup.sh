@@ -1,6 +1,7 @@
 #!/bin/bash
 #documentation: https://prometheus.io/download/
 #documentation: https://github.com/prometheus/prometheus/releases
+#paths: /etc/prometheus (config), /var/lib/prometheus (data)
 #access: http://ip:9090
 set -e
 
