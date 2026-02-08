@@ -31,13 +31,13 @@ mkdir -p "${DATA_DIR}"
 chown -R prometheus:prometheus "${DATA_DIR}"
 chmod -R 775 "${DATA_DIR}"
 
-mkdir -p "${CONFIG_DIR}/rules"
-mkdir -p "${CONFIG_DIR}/rules.s"
-mkdir -p "${CONFIG_DIR}/files_sd"
+mkdir -p "${CONF_DIR}/rules"
+mkdir -p "${CONF_DIR}/rules.s"
+mkdir -p "${CONF_DIR}/files_sd"
 
 cd "${EXTRACT_DIR}"
 mv prometheus promtool "${BIN_DIR}"
-mv prometheus.yml "${CONFIG_DIR}"
+mv prometheus.yml "${CONF_DIR}"
 
 # Create systemd service file
 cat > "${SERVICE_FILE}" << EOF
@@ -67,8 +67,8 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-chown -R prometheus:prometheus "${CONFIG_DIR}"
-chmod -R 775 "${CONFIG_DIR}"
+chown -R prometheus:prometheus "${CONF_DIR}"
+chmod -R 775 "${CONF_DIR}"
 chown -R prometheus:prometheus "${DATA_DIR}"
 
 systemctl daemon-reload
