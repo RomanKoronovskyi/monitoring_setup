@@ -1,49 +1,36 @@
 #!/bin/bash
-#documentation: https://prometheus.io/download/
-#documentation: https://github.com/prometheus/prometheus/releases
-#paths: /etc/prometheus (config), /var/lib/prometheus (data)
-#access: http://ip:9090
+#Prometheus + Node Exporter + Promtail
+#Prometheus (9090), Node Exporter (9100), Promtail (9080)
 set -e
 
-echo "prometheus" > /etc/hostname
-hostname prometheus
-
 PROM_VERSION="3.5.1"
-DOWNLOAD_URL="https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
-TAR_FILE="prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
-TMP_DIR="/tmp/prometheus"
-DATA_DIR="/var/lib/prometheus"
+NODE_VERSION="1.8.2"
+PTAIL_VERSION="3.0.0"
+LOKI_URL="http://172.31.29.174:3100/loki/api/v1/push"
+TMP_DIR="/tmp/monitoring_install"
 CONF_DIR="/etc/prometheus"
-EXTRACT_DIR="prometheus-${PROM_VERSION}.linux-amd64"
-BIN_DIR="/usr/local/bin"
-SERVICE_FILE="/etc/systemd/system/prometheus.service"
+DATA_DIR="/var/lib/prometheus"
 
 mkdir -p "${TMP_DIR}"
+sudo apt update && sudo apt install -y wget unzip
+
+#Prometheus
 cd "${TMP_DIR}"
-wget "${DOWNLOAD_URL}"
-tar xzvf "${TAR_FILE}"
+wget -q "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
+tar xzvf "prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
 
-#group + user
-groupadd --system prometheus
-useradd -s /sbin/nologin --system -g prometheus prometheus
+getent group prometheus >/dev/null || groupadd --system prometheus
+getent passwd prometheus >/dev/null || useradd -s /sbin/nologin --system -g prometheus prometheus
+mkdir -p "${DATA_DIR}" "${CONF_DIR}/rules" "${CONF_DIR}/files_sd"
+cd "prometheus-${PROM_VERSION}.linux-amd64"
+sudo mv prometheus promtool /usr/local/bin/
+sudo mv prometheus.yml "${CONF_DIR}/"
+[ -d "consoles" ] && sudo mv consoles "${CONF_DIR}/"
+[ -d "console_libraries" ] && sudo mv console_libraries "${CONF_DIR}/"
 
-mkdir -p "${DATA_DIR}"
-chown -R prometheus:prometheus "${DATA_DIR}"
-chmod -R 775 "${DATA_DIR}"
-
-mkdir -p "${CONF_DIR}/rules"
-mkdir -p "${CONF_DIR}/rules.s"
-mkdir -p "${CONF_DIR}/files_sd"
-
-cd "${EXTRACT_DIR}"
-mv prometheus promtool "${BIN_DIR}"
-mv prometheus.yml "${CONF_DIR}"
-
-# Create systemd service file
-cat > "${SERVICE_FILE}" << EOF
+sudo cat > /etc/systemd/system/prometheus.service << EOF
 [Unit]
 Description=Prometheus
-Documentation=https://prometheus.io/docs/introduction/overview/
 Wants=network-online.target
 After=network-online.target
 
@@ -51,39 +38,85 @@ After=network-online.target
 Type=simple
 User=prometheus
 Group=prometheus
-ExecReload=/bin/kill -HUP \$MAINPID
 ExecStart=/usr/local/bin/prometheus \\
-  --config.file=/etc/prometheus/prometheus.yml \\
-  --storage.tsdb.path=/var/lib/prometheus \\
-  --web.console.templates=/etc/prometheus/consoles \\
-  --web.console.libraries=/etc/prometheus/console_libraries \\
-  --web.listen-address=0.0.0.0:9090 \\
-  --web.enable-remote-write-receiver
+  --config.file=${CONF_DIR}/prometheus.yml \\
+  --storage.tsdb.path=${DATA_DIR} \\
+  --web.listen-address=0.0.0.0:9090
 
-SyslogIdentifier=prometheus
+Restart=always
+EOF
+
+#Node exporter
+cd "${TMP_DIR}"
+wget -q "https://github.com/prometheus/node_exporter/releases/download/v${NODE_VERSION}/node_exporter-${NODE_VERSION}.linux-amd64.tar.gz"
+tar xzvf "node_exporter-${NODE_VERSION}.linux-amd64.tar.gz"
+sudo mv "node_exporter-${NODE_VERSION}.linux-amd64/node_exporter" /usr/local/bin/
+
+sudo cat > /etc/systemd/system/node_exporter.service << EOF
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=root
+ExecStart=/usr/local/bin/node_exporter
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-chown -R prometheus:prometheus "${CONF_DIR}"
-chmod -R 775 "${CONF_DIR}"
-chown -R prometheus:prometheus "${DATA_DIR}"
+#Promtail
+cd "${TMP_DIR}"
+wget -q "https://github.com/grafana/loki/releases/download/v${PTAIL_VERSION}/promtail-linux-amd64.zip"
+unzip -o promtail-linux-amd64.zip
+sudo mv promtail-linux-amd64 /usr/local/bin/promtail
+sudo chmod +x /usr/local/bin/promtail
+sudo mkdir -p /etc/promtail
 
-systemctl daemon-reload
-systemctl enable prometheus
-systemctl start prometheus
+sudo cat <<EOF > /etc/promtail/config.yml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
 
+positions:
+  filename: /tmp/positions.yaml
 
+clients:
+  - url: ${LOKI_URL}
 
+scrape_configs:
+- job_name: system
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: varlogs
+      host: $(hostname)
+      __path__: /var/log/*.log
+EOF
 
+sudo cat <<EOF > /etc/systemd/system/promtail.service
+[Unit]
+Description=Promtail service
+After=network.target
 
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/config.yml
+Restart=always
 
+[Install]
+WantedBy=multi-user.target
+EOF
 
+sudo chown -R prometheus:prometheus "${CONF_DIR}" "${DATA_DIR}"
+sudo chmod -R 775 "${CONF_DIR}" "${DATA_DIR}"
 
+sudo systemctl daemon-reload
+for srv in prometheus node_exporter promtail; do
+    sudo systemctl enable --now $srv
+done
 
-
-
-
-
+rm -rf "${TMP_DIR}"
